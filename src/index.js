@@ -1,6 +1,6 @@
 // Global variable to track last service down notification
 let lastServiceDownAlert = 0;
-const ALERT_COOLDOWN = 60000; // 1 minute cooldown
+const ALERT_COOLDOWN = 15000; //  15 seconds cooldown
 
 export default {
   async fetch(request) {
