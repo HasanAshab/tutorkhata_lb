@@ -1,3 +1,7 @@
+// Global variable to track last service down notification
+let lastServiceDownAlert = 0;
+const ALERT_COOLDOWN = 60000; // 1 minute cooldown
+
 export default {
   async fetch(request) {
     const backends = [
@@ -15,9 +19,17 @@ export default {
     const healthyBackend = await findHealthyBackend(shuffledBackends);
     
     if (!healthyBackend) {
-      await notifyFailure("All backends are down - service unavailable");
+      // Only send alert if cooldown period has passed
+      const now = Date.now();
+      if (now - lastServiceDownAlert > ALERT_COOLDOWN) {
+        await notifyFailure("All backends are down - service unavailable");
+        lastServiceDownAlert = now;
+      }
       return new Response("Service Unavailable", { status: 503 });
     }
+
+    // Reset the alert timer when service is back up
+    lastServiceDownAlert = 0;
 
     // Forward request to healthy backend
     return fetch(healthyBackend + url.pathname + url.search, request);
