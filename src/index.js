@@ -6,53 +6,52 @@ export default {
       "https://api3.example.com",
     ];
 
+    // Shuffle backends for random order health checking
+    const shuffledBackends = [...backends].sort(() => Math.random() - 0.5);
+    
     const url = new URL(request.url);
-    const path = url.pathname + url.search;
-
-    let lastError = null;
-
-    // Try each backend in order
-    for (const backend of backends) {
-      try {
-        const res = await fetch(backend + path, {
-          method: request.method,
-          headers: request.headers,
-          body: request.body,
-        });
-
-        // Check health endpoint
-        if (path === "/api/health") {
-          const data = await res.json().catch(() => ({}));
-          if (data.success === true) {
-            return new Response(JSON.stringify({backend, success: true}), {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            });
-          } else {
-            // Failed health
-            lastError = `Health check failed at ${backend}`;
-            continue; // try next backend
-          }
-        }
-
-        // Normal request: just proxy
-        if (res.ok) return res;
-
-      } catch (err) {
-        lastError = `Error connecting to ${backend}: ${err.message}`;
-        continue;
-      }
+    
+    // Find a healthy backend
+    const healthyBackend = await findHealthyBackend(shuffledBackends);
+    
+    if (!healthyBackend) {
+      await notifyFailure("All backends are down - service unavailable");
+      return new Response("Service Unavailable", { status: 503 });
     }
 
-    // All backends failed → send notification
-    if (lastError) await notifyFailure(lastError);
-
-    return new Response(
-      JSON.stringify({success: false, message: "Service Unavailable." }),
-      {status: 503, headers: {"Content-Type": "application/json"}}
-    );
-  },
+    // Forward request to healthy backend
+    return fetch(healthyBackend + url.pathname + url.search, request);
+  }
 };
+
+// Health check function to find a working backend
+async function findHealthyBackend(backends) {
+  for (const backend of backends) {
+    try {
+      const healthResponse = await fetch(`${backend}/api/health`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        // Add timeout to prevent hanging
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (healthResponse.ok) {
+        const healthData = await healthResponse.json();
+        if (healthData.success === true) {
+          return backend;
+        } else {
+          await notifyFailure(`Backend ${backend} health check failed - success: ${healthData.success}`);
+        }
+      } else {
+        await notifyFailure(`Backend ${backend} health check failed - HTTP ${healthResponse.status}`);
+      }
+    } catch (error) {
+      await notifyFailure(`Backend ${backend} health check error - ${error.message}`);
+    }
+  }
+  
+  return null; // No healthy backend found
+}
 
 // Simple notification function
 async function notifyFailure(message) {
